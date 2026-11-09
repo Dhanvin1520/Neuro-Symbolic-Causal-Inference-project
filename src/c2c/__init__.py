@@ -4,4 +4,7 @@
 * graphs.py   - notebook 02, PC algorithm, equivalence class and claim rules
 * features.py - notebook 03, structured features
 * bayes.py    - notebook 05, DAG building and intervention effects
+
+Phase 2:
+* reader.py      - notebook 06, rename variables to A-F
 """
