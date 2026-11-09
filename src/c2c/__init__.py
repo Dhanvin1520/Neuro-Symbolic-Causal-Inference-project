@@ -7,4 +7,5 @@
 
 Phase 2:
 * reader.py      - notebook 06, rename variables to A-F
+* transformer.py - notebooks 07 and 08, fine-tune DistilBERT and predict
 """
