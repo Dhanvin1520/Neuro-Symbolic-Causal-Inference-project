@@ -6,6 +6,6 @@
 * bayes.py    - notebook 05, DAG building and intervention effects
 
 Phase 2:
-* reader.py      - notebook 06, rename variables to A-F
+* reader.py      - notebooks 06 and 07, rename variables to A-F and the wordings for the claim readers
 * transformer.py - notebooks 07 and 08, fine-tune DistilBERT and predict
 """
