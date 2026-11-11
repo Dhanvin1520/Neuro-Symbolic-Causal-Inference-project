@@ -17,7 +17,9 @@ def build_dag(variables, edges):
 def do_effect(model, cause, effect):
     """P(effect=1 | do(cause=1)) - P(effect=1 | do(cause=0)) in a fitted pgmpy network."""
     # forcing a variable can't change anything that is not downstream of it
-    if effect not in nx.descendants(nx.DiGraph(model.edges()), cause):
+    graph = nx.DiGraph(model.edges())
+    graph.add_nodes_from(model.nodes())   # keep variables that have no arrows
+    if effect not in nx.descendants(graph, cause):
         return 0.0
     inference = CausalInference(model)
     p1 = inference.query([effect], do={cause: 1}, show_progress=False).values[1]

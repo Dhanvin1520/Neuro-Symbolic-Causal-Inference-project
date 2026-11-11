@@ -19,3 +19,14 @@ def test_do_effect_follows_the_arrows():
     # effect of A on C = 0.7 * 0.7 = 0.49, and forcing C cannot change A
     assert abs(do_effect(model, "A", "C") - 0.49) < 1e-9
     assert do_effect(model, "C", "A") == 0.0
+
+
+def test_do_effect_with_a_variable_that_has_no_arrows():
+    # D has no edges at all (e.g. an empty or partly empty predicted graph): forcing it changes nothing
+    model = DiscreteBayesianNetwork([("A", "B")])
+    model.add_node("D")
+    model.add_cpds(TabularCPD("A", 2, [[0.5], [0.5]]),
+                   TabularCPD("B", 2, [[0.9, 0.2], [0.1, 0.8]], evidence=["A"], evidence_card=[2]),
+                   TabularCPD("D", 2, [[0.5], [0.5]]))
+    assert do_effect(model, "D", "A") == 0.0
+    assert do_effect(model, "A", "D") == 0.0
