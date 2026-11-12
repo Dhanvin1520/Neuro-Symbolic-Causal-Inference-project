@@ -9,7 +9,30 @@ Classical models (Logistic Regression, Random Forest, Gradient Boosting) then pr
 predicted cause arrows are built into a DAG and a pgmpy Bayesian network, which answers intervention ("what if")
 questions.
 
-## Results (test set)
+**Phase 2** adds a fine-tuned **DistilBERT** that reads the claims, so the pipeline still works when the text is
+reworded or the variables are renamed. It compares this with a TF-IDF reader and with an end-to-end DistilBERT
+that reads everything and uses no graph.
+
+## Phase 2 results (deep learning)
+
+Test F1 on the original test set and on the authors' two harder versions of it (same 21 premises):
+
+| Method | Original | Reworded claims | Renamed variables |
+|---|---|---|---|
+| Regex reader + PC (Phase 1) | 0.952 | 0.000 | 0.948 |
+| TF-IDF + Logistic Regression reader + PC | 0.952 | 0.536 | 0.948 |
+| **DistilBERT reader + PC** | **0.952** | **0.948** | **0.948** |
+| End-to-end DistilBERT (no graph) | 0.528 | 0.388 | 0.294 |
+
+* **Reading the claim:** DistilBERT reads 100% of the reworded claims (83–91% with other random seeds). The
+  regex reads none, and TF-IDF swaps every collider and confounder, because those two wordings use the same words
+  in a different order.
+* **No fluent shortcut:** the end-to-end DistilBERT calls about 40% of claims valid when only 15% are. Its 95% CI
+  never overlaps the graph pipeline's (e.g. reworded: 0.27–0.47 vs 0.91–0.98).
+* **Graphs from reworded text:** edge precision 0.89, recall 1.00, and 28 / 32 real intervention effects correct.
+  The Phase 1 regex finds no edges there, so it gets 0 / 32.
+
+## Phase 1 results (test set)
 
 | What we measured | Result |
 |---|---|
@@ -31,6 +54,16 @@ For comparison, an empty graph or a reversed graph gets **0 of the 32** real eff
 | 3 | `03_feature_engineering` | Dhanvin Vadlamudi ([@Dhanvin1520](https://github.com/Dhanvin1520)) | TF-IDF, 15 structured features, chi-squared / mutual information, ablation |
 | 4 | `04_models_evaluation` | Kasula Lalithendra ([@Lalith0024](https://github.com/Lalith0024)) | GridSearchCV with GroupKFold, model selection, confusion matrix, bootstrap CI, error analysis |
 | 5 | `05_dag_bayesian_network` | Jagruthi Pulumati ([@Jag2007](https://github.com/Jag2007)) | DAG building, edge precision, Bayesian network, intervention queries |
+
+**Phase 2**
+
+| Step | Notebook | Owner | What it does |
+|---|---|---|---|
+| 6 | `06_robustness_test_sets` | Chaitanya Sai Meka | Load the reworded and renamed test sets, rename variables to A–F, leakage check, EDA |
+| 7 | `07_claim_reader` | Rakshita | Regex vs TF-IDF vs fine-tuned DistilBERT reader, P/R/F1, review of unsure reads, seed check |
+| 8 | `08_end_to_end_transformer` | Dhanvin Vadlamudi | End-to-end DistilBERT on premise + hypothesis, no graph |
+| 9 | `09_comparison` | Kasula Lalithendra | Every method on all three test sets, bootstrap CIs, error analysis |
+| 10 | `10_dag_on_reworded_text` | Jagruthi Pulumati | DAGs and intervention queries from reworded text, final results table |
 
 ## Worked example: ice cream and drowning
 
@@ -86,9 +119,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run the notebooks in `notebooks/` in order (01 → 05). Notebook 01 downloads the data from Hugging Face. Each
-notebook writes its output as CSV files to `data/processed/` for the next notebook, and saves its figures to
-`report/figures/`. A full run takes about 4 minutes.
+Run the notebooks in `notebooks/` in order (01 → 10). Notebooks 01 and 06 download the data from Hugging Face.
+Each notebook writes its output as CSV files to `data/processed/` for the next notebook, and saves its figures to
+`report/figures/`. Notebooks 01–05 take about 4 minutes and 06, 07, 09 and 10 a few minutes each.
+
+> **Notebook 08 needs a GPU.** It fine-tunes DistilBERT on 35,340 premise and hypothesis pairs, which took 31
+> minutes on a free Google Colab T4 GPU (our results). On an 8 GB laptop it runs out of memory.
 
 > **Note:** the processed CSVs (about 140 MB) and the raw data are not stored in git. Running the notebooks in order
 > rebuilds them.
@@ -102,14 +138,16 @@ python -m pytest
 ## Repository layout
 
 ```
-notebooks/        01 → 05, one per team member
+notebooks/        01 → 05 (Phase 1) and 06 → 10 (Phase 2), one per team member in each phase
 src/c2c/          shared code used by the notebooks
   parsing.py      regex parser and schema checks        (notebook 02)
   graphs.py       PC, equivalence class, claim rules    (notebook 02)
   features.py     structured features                   (notebook 03)
   bayes.py        DAG building, intervention effects    (notebook 05)
+  reader.py       rename variables, claim wordings      (notebooks 06, 07)
+  transformer.py  fine-tune DistilBERT and predict      (notebooks 07, 08)
 tests/            pytest unit tests for every module
-report/           IEEE report (report.tex, report.pdf), figures, phase 1 slides
+report/           IEEE reports (report = Phase 1, report_phase2 = Phase 2), figures, phase 1 and phase 2 slides
 data/             raw/ and processed/ CSVs, rebuilt by the notebooks (not in git)
 ```
 
@@ -118,12 +156,17 @@ data/             raw/ and processed/ CSVs, rebuilt by the notebooks (not in git
 * **Train:** fits everything (TF-IDF, scaler, models). It is subsampled to 400 whole premises (seed 42).
 * **Validation:** used to choose the final model.
 * **Test:** used once, only to report the final results.
+* **Phase 2 readers** learn only from sentence wordings (`src/c2c/reader.py`), never from labels. None of our
+  wordings use the words of the authors' reworded test, and the last wording of each claim type is held out for
+  validation.
 
 Premises shared between splits are removed, so there is no data leakage. Cross-validation (GroupKFold) and the
 bootstrap both group rows by premise.
 
 ## Report
 
-The full write-up is in [`report/report.pdf`](report/report.pdf). To rebuild it from the LaTeX source, run
-`tectonic report.tex` inside `report/`. The Phase 1 slides are in
-[`report/phase1_presentation.pptx`](report/phase1_presentation.pptx).
+The write-ups are in [`report/report.pdf`](report/report.pdf) (Phase 1) and
+[`report/report_phase2.pdf`](report/report_phase2.pdf) (Phase 2). To rebuild them from the LaTeX source, run
+`tectonic report.tex` and `tectonic report_phase2.tex` inside `report/`. The slides are in
+[`report/phase1_presentation.pptx`](report/phase1_presentation.pptx) and
+[`report/phase2_presentation.pptx`](report/phase2_presentation.pptx).
