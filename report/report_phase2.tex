@@ -94,17 +94,33 @@ All graph methods decide with the Phase 1 \emph{symbolic rule}: a claim is valid
 the confidence interval, so in Phase 2 the comparison is only about \emph{reading}.
 
 \section{Related Work}
-\textbf{Bayesian networks.} Pearl~\cite{pearl1988} introduced Bayesian networks: a DAG with a probability table at
-each node. We use them to answer ``what if'' (intervention) questions.
+\textbf{Causal graphs.} Pearl~\cite{pearl1988} introduced Bayesian networks: a DAG with a probability table at
+each node. We use them to answer ``what if'' (intervention) questions. The PC algorithm~\cite{spirtes2000} finds the
+DAGs that fit a set of independence facts; we reuse it unchanged from Phase 1.
 
-\textbf{Transformers.} BERT~\cite{devlin2019} is a transformer language model that is first trained on a lot of
-plain text and then \emph{fine-tuned} on a small labelled task. DistilBERT~\cite{sanh2019} is a smaller copy of
-BERT (6 layers instead of 12) that keeps about 97\% of its language understanding and runs about 60\% faster, so it
-can be fine-tuned on a free GPU.
+\textbf{Transformers.} The transformer~\cite{vaswani2017} replaces recurrence with \emph{self-attention}: every token
+looks at every other token, and position information is added, so word order is kept. BERT~\cite{devlin2019}
+pretrains a transformer encoder on a lot of plain text and is then \emph{fine-tuned} on a small labelled task.
+RoBERTa~\cite{liu2019} trains the same design longer on more data and is stronger, but larger.
+DistilBERT~\cite{sanh2019} is a smaller copy of BERT (6 layers instead of 12) that keeps about 97\% of its language
+understanding and runs about 60\% faster, so it can be fine-tuned on a free GPU. Sun et al.~\cite{sun2019} give
+practical recipes for fine-tuning BERT on classification, such as small learning rates (2--5$\times10^{-5}$) and few
+epochs, which we follow.
 
-\textbf{Language models on Corr2Cause.} The Corr2Cause authors~\cite{jin2024} found that fine-tuned models score
-well on the original test but fail on the reworded and renamed versions, so they learn surface patterns, not
-reasoning.
+\textbf{Language models and causal reasoning.} Corr2Cause~\cite{jin2024} is posed as natural language inference,
+the premise--hypothesis format of MNLI~\cite{williams2018}. Its authors found that 17 large language models score
+near chance, and that fine-tuned BERT-style models score well on the original test but fail on the reworded and
+renamed versions, so they learn surface patterns, not reasoning. CLadder~\cite{jin2023cladder} finds the same
+weakness on questions across Pearl's ladder of causation, and K\i c\i man et al.~\cite{kiciman2023} and
+Ze\v{c}evi\'c et al.~\cite{zecevic2023} argue that language models repeat causal facts from their training text
+rather than reason about them. This is why we keep the graph for the reasoning.
+
+\textbf{Stable fine-tuning.} Fine-tuning results can change a lot with the random seed, especially on small
+datasets~\cite{dodge2020,mosbach2021}. We therefore report a range over seeds, not only our best run.
+
+\textbf{Regularization.} Dropout~\cite{srivastava2014} randomly switches off units during training, so the network
+cannot rely on any single one. AdamW~\cite{loshchilov2019} separates weight decay from the gradient step, which
+works better for transformers. Both are part of our training setup (Section~\ref{sec:training}).
 
 \textbf{Neuro-symbolic AI.} A learned part reads the input and a rule-based part does exact
 reasoning~\cite{garcez2023}. Phase 2 makes the learned part a transformer and keeps the graph.
@@ -121,6 +137,32 @@ If mec\_support $=1$, the claim holds in every fitting DAG, so we call it valid.
 pieces of words) and looks at all of them together, including their order. DistilBERT reads at most 512 tokens at
 once. \emph{Fine-tuning} means we start from the pretrained model, add a small new output layer, and train the whole
 model for a short time on our own examples.
+
+\textbf{Self-attention.} Each token is turned into a query, a key and a value (the rows of $Q$, $K$ and $V$). A
+token's new representation is a weighted mix of all the values, with weights from how well its query matches each
+key ($d_k$ is the key size):
+\begin{equation}
+\mathrm{Attention}(Q,K,V) = \mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right)V .
+\end{equation}
+DistilBERT stacks 6 such layers (12 attention heads, 768 dimensions). Because position is added to every token,
+``A causes B'' and ``B causes A'' get different representations, unlike TF-IDF.
+
+\textbf{Output and loss.} A small two-layer head on the vector of the first token, $h_{\text{[CLS]}}$, gives the
+class probabilities. Training minimises the class-weighted cross-entropy:
+\begin{equation}
+p = \mathrm{softmax}\big(W_2\,\mathrm{ReLU}(W_1 h_{\text{[CLS]}} + b_1) + b_2\big),
+\end{equation}
+\begin{equation}
+\mathcal{L} = -\frac{\sum_i w_{y_i}\log p_{i,y_i}}{\sum_i w_{y_i}}.
+\end{equation}
+For the end-to-end model $w_c = N/(2N_c)$, so the rare valid class counts as much as the common one. The readers
+use $w_c = 1$.
+
+\textbf{AdamW.} The weights $\theta$ are updated with learning rate $\eta$ and decoupled weight decay $\lambda$:
+\begin{equation}
+\theta \leftarrow \theta - \eta\left(\frac{\hat m}{\sqrt{\hat v}+\epsilon} + \lambda\,\theta\right),
+\end{equation}
+where $\hat m$ and $\hat v$ are running averages of the gradient and of its square.
 
 \textbf{Intervention.} Forcing a variable to a value is written $do(X)$. The effect of X on Y is
 \begin{equation}
@@ -243,7 +285,53 @@ Refactorization & 0.204 & 0.529 & 0.294 \\
 0.29 on the harder sets (Table~\ref{tab:e2e}). The model calls about 40\% of claims valid when only 15\% are: on the
 original test it makes 291 false alarms but misses only 11 valid claims. Renaming the variables back to A--F lifts
 its refactorization F1 from 0.29 to 0.51, so it partly relies on the letter names it saw in training. It has
-learned word patterns, not the rule ``true in every fitting DAG''. This matches what the Corr2Cause authors found.
+learned word patterns, not the rule ``true in every fitting DAG''. The Corr2Cause authors' fine-tuned models score
+much higher on the original test than ours: we trained for one epoch on 400 premises, and 160 of them were cut at
+512 tokens. What matches their finding is the drop on the harder sets.
+
+\section{Training and Regularization}
+\label{sec:training}
+Table~\ref{tab:training} lists how both DistilBERT models were trained.
+
+\begin{table}[t]
+\centering
+\caption{How the two DistilBERT models were trained}
+\label{tab:training}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{p{0.24\linewidth}p{0.32\linewidth}p{0.34\linewidth}}
+\toprule
+Setting & Claim reader (07) & End-to-end (08) \\
+\midrule
+Input & Claim only & Premise + claim, premise cut at 512 tokens \\
+Training data & 600 sentences: 20 wordings $\times$ 30 ordered pairs of A--F & 35{,}340 premise--claim pairs \\
+Validation & 120 sentences, one held-out wording per type & 1{,}026 rows (19 premises) \\
+Output & 4 claim types & Valid / not valid \\
+Epochs, batch, rate & 3, 16, $3\times10^{-5}$ & 1, 8, $3\times10^{-5}$ \\
+Optimizer & AdamW, weight decay 0.01 & AdamW, weight decay 0.01 \\
+Dropout & 0.1 in every layer, 0.2 before the output & Same \\
+Class weights & None & Balanced \\
+Seed & 42, plus 3 others checked & 42 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{How we limit overfitting.}
+\begin{itemize}
+\item \emph{Dropout and weight decay:} DistilBERT's built-in dropout (0.1 in the attention and hidden layers, 0.2
+before the output layer) and AdamW's decoupled weight decay of 0.01.
+\item \emph{Few epochs:} we fixed the number of epochs in advance (3 and 1) instead of training to convergence. We
+used no learning-rate schedule and no early stopping.
+\item \emph{Data augmentation:} for the reader we turned the 5 dataset templates into 20 wordings and filled in every
+ordered pair of A--F. This lifted held-out-wording accuracy from 0.50 to 0.83 (Table~\ref{tab:ablation}).
+\item \emph{Held-out wording:} the validation wording of each type is never trained on, and the test wordings use
+words none of ours use, so the reader is always checked on new phrasing.
+\end{itemize}
+
+\textbf{What the training loss shows.} The reader's training loss falls from 0.82 to 0.02 in three epochs: it fits
+the 600 sentences almost perfectly, which is why we judge it only on held-out wordings and several seeds. The
+end-to-end model's mean loss after its single epoch is still 0.49: it is under-trained rather than over-fitted,
+which matches its low precision.
 
 \section{Step 9: Comparison (Notebook 09)}
 Table~\ref{tab:compare} and Fig.~\ref{fig:compare} put all four methods side by side.
@@ -294,6 +382,38 @@ correctly (92 of 96 queries). The regex reader finds no arrows in the reworded t
 it gets 0 of the 32 real effects.
 
 
+\section{Ablation Studies}
+Table~\ref{tab:ablation} changes one part of the pipeline at a time and keeps everything else fixed.
+
+\begin{table}[t]
+\centering
+\caption{Ablation studies: what each part adds}
+\label{tab:ablation}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{p{0.40\linewidth}p{0.52\linewidth}}
+\toprule
+What we change & Result \\
+\midrule
+Remove the graph: end-to-end DistilBERT instead of reader + PC & F1 original 0.952 $\to$ 0.528, reworded
+0.948 $\to$ 0.388 \\
+Swap the reader: DistilBERT $\to$ TF-IDF $\to$ regex & Reworded F1 0.948 $\to$ 0.536 $\to$ 0.000 \\
+Train the readers on the 5 original templates only, not 20 wordings & Held-out-wording accuracy: DistilBERT 0.83
+$\to$ 0.50, TF-IDF 0.92 $\to$ 0.75 \\
+Turn off the renaming rule (raw names) & Renamed-set F1: regex + PC 0.948 $\to$ 0.000; end-to-end 0.507 $\to$
+0.294 \\
+Review threshold: pass only reads $\geq$ 90\% sure & 90.4\% of reworded claims pass, all read correctly \\
+Change the random seed (4 seeds) & Reworded claims read: 83--100\% (TF-IDF 67\%) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three results stand out. Removing the graph costs the most, on every test set, so the graph carries the reasoning.
+Word order matters: only DistilBERT tells colliders from confounders in reworded text. And our own validation
+wording can mislead: there TF-IDF scores higher than DistilBERT (0.92 vs 0.83), because that wording shares many
+words with the training wordings. On the authors' paraphrases, which share few words, TF-IDF falls to 67\% and
+DistilBERT reads every claim, so the authors' test is the fair check.
+
 \section{What Improved from Phase 1}
 Table~\ref{tab:improved} puts the two phases side by side.
 
@@ -329,7 +449,8 @@ still answer 28 of 32 real ``what if'' effects.
 
 \textbf{Limitations.} Corr2Cause is made from templates; the reworded set changes only the claim, with one new
 wording per claim type, and the premises are still read by regex. Our extra training wordings were written by us,
-and the DistilBERT reader's score depends on the random seed (83--100\%). The Bayesian network data is simulated,
+and the DistilBERT reader's score depends on the random seed (83--100\%). The end-to-end model is a light
+baseline: one epoch on 400 premises, with long premises cut at 512 tokens. The Bayesian network data is simulated,
 not measured.
 
 \textbf{Next steps.} Read the premise with the transformer too, test on free text such as PubMed abstracts, and
@@ -359,15 +480,41 @@ Report and repository & & & & & \checkmark \\
 \end{center}
 \end{minipage}
 
-\begin{thebibliography}{10}
+\begin{thebibliography}{20}
 \bibitem{jin2024} Z.~Jin, J.~Liu, Z.~Lyu, S.~Poff, M.~Sachan, R.~Mihalcea, M.~Diab, and B.~Sch\"olkopf,
 ``Can large language models infer causation from correlation?'' in \emph{Proc. ICLR}, 2024.
 \bibitem{pearl1988} J.~Pearl, \emph{Probabilistic Reasoning in Intelligent Systems: Networks of Plausible
 Inference}. Morgan Kaufmann, 1988.
+\bibitem{spirtes2000} P.~Spirtes, C.~Glymour, and R.~Scheines, \emph{Causation, Prediction, and Search},
+2nd~ed. MIT Press, 2000.
+\bibitem{vaswani2017} A.~Vaswani \emph{et al.}, ``Attention is all you need,'' in \emph{Proc. NeurIPS}, 2017,
+pp.~5998--6008.
 \bibitem{devlin2019} J.~Devlin, M.-W.~Chang, K.~Lee, and K.~Toutanova, ``BERT: Pre-training of deep bidirectional
 transformers for language understanding,'' in \emph{Proc. NAACL-HLT}, 2019, pp.~4171--4186.
+\bibitem{liu2019} Y.~Liu \emph{et al.}, ``RoBERTa: A robustly optimized BERT pretraining approach,''
+\emph{arXiv:1907.11692}, 2019.
 \bibitem{sanh2019} V.~Sanh, L.~Debut, J.~Chaumond, and T.~Wolf, ``DistilBERT, a distilled version of BERT:
 smaller, faster, cheaper and lighter,'' in \emph{Proc. NeurIPS EMC$^2$ Workshop}, 2019.
+\bibitem{sun2019} C.~Sun, X.~Qiu, Y.~Xu, and X.~Huang, ``How to fine-tune BERT for text classification?'' in
+\emph{Proc. China National Conf. on Chinese Computational Linguistics}, 2019, pp.~194--206.
+\bibitem{williams2018} A.~Williams, N.~Nangia, and S.~Bowman, ``A broad-coverage challenge corpus for sentence
+understanding through inference,'' in \emph{Proc. NAACL}, 2018, pp.~1112--1122.
+\bibitem{jin2023cladder} Z.~Jin \emph{et al.}, ``CLadder: Assessing causal reasoning in language models,'' in
+\emph{Proc. NeurIPS}, 2023.
+\bibitem{kiciman2023} E.~K\i c\i man, R.~Ness, A.~Sharma, and C.~Tan, ``Causal reasoning and large language
+models: Opening a new frontier for causality,'' \emph{arXiv:2305.00050}, 2023.
+\bibitem{zecevic2023} M.~Ze\v{c}evi\'c, M.~Willig, D.~S.~Dhami, and K.~Kersting, ``Causal parrots: Large language
+models may talk causality but are not causal,'' \emph{Trans. Mach. Learn. Res.}, 2023.
+\bibitem{dodge2020} J.~Dodge, G.~Ilharco, R.~Schwartz, A.~Farhadi, H.~Hajishirzi, and N.~Smith, ``Fine-tuning
+pretrained language models: Weight initializations, data orders, and early stopping,'' \emph{arXiv:2002.06305},
+2020.
+\bibitem{mosbach2021} M.~Mosbach, M.~Andriushchenko, and D.~Klakow, ``On the stability of fine-tuning BERT:
+Misconceptions, explanations, and strong baselines,'' in \emph{Proc. ICLR}, 2021.
+\bibitem{srivastava2014} N.~Srivastava, G.~Hinton, A.~Krizhevsky, I.~Sutskever, and R.~Salakhutdinov, ``Dropout: A
+simple way to prevent neural networks from overfitting,'' \emph{J. Mach. Learn. Res.}, vol.~15, pp.~1929--1958,
+2014.
+\bibitem{loshchilov2019} I.~Loshchilov and F.~Hutter, ``Decoupled weight decay regularization,'' in \emph{Proc.
+ICLR}, 2019.
 \bibitem{garcez2023} A.~d'Avila Garcez and L.~C.~Lamb, ``Neurosymbolic AI: The 3rd wave,'' \emph{Artif. Intell.
 Rev.}, vol.~56, pp.~12387--12406, 2023.
 \end{thebibliography}
