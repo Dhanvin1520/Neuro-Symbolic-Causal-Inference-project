@@ -28,9 +28,9 @@ algorithm, and decides if a causal claim is valid (test F1 0.957). Regex only wo
 fixed sentences. In Phase 2 we test the pipeline on the dataset authors' two harder test sets, where the claims are
 reworded or the variables renamed. The Phase 1 regex reads none of the reworded claims (F1 0.00). We fine-tune a
 DistilBERT transformer to read the claim and keep the PC graph for the reasoning. This pipeline keeps an F1 of 0.95
-on all three test sets, and the graphs it builds from reworded text still answer 28 of 32 ``what if'' questions
-correctly. A DistilBERT that reads the whole text and uses no graph reaches only 0.53, and falls to 0.39 and 0.29 on
-the harder sets. So fluent language alone is not causal reasoning.
+on all three test sets, and the graphs it builds from reworded text still answer 28 of 32 intervention queries with
+causal paths correctly on simulated data. A DistilBERT that reads the whole text and uses no graph reaches only 0.53, and falls to 0.39 and 0.29 on
+the harder sets. So this language-only baseline does not learn the causal rule.
 \end{abstract}
 
 \section{Introduction}
@@ -55,7 +55,7 @@ Symbolic rule (graph only, no learning): F1 & 0.952 \\
 Random Forest (chosen on validation): F1 & 0.957 \\
 TF-IDF features only (validation): F1 & 0.47 \\
 Edge precision of the predicted DAGs & 0.89 \\
-Real ``what if'' effects answered correctly & 28 / 32 \\
+Intervention queries with causal paths, correct (simulated data) & 28 / 32 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -211,7 +211,7 @@ There exists at least one confounder (i.e., common cause) of A and B. & Some var
 A \emph{reader} takes the claim sentence and predicts its type: direct cause, indirect cause, collider or
 confounder. The two variables are still the single capital letters. We compare three readers.
 
-\textbf{Training sentences.} The readers learn from sentences only, never from labels. Trained on the five
+\textbf{Training sentences.} The readers learn claim types, not whether claims are causally valid. Trained on the five
 original templates alone, TF-IDF read only 75\% and DistilBERT only 50\% of new wordings we held out, so five
 wordings are not enough. We therefore wrote four extra wordings for each claim type, such as ``A and B share a
 common effect''. None of them uses the words of the authors' test (``affects'', ``influences'', ``mediator'',
@@ -250,8 +250,9 @@ colliders and confounders (macro F1 0.50): ``A and B together cause some other v
 variable causes both A and B'' (confounder) use almost the same words in a different order, and TF-IDF only counts
 words. DistilBERT reads words in order, so it gets precision, recall and F1 of 1.00 for every type.
 
-\textbf{Review of unsure reads.} We only pass a read straight to the graph step when DistilBERT is at least 90\%
-sure. This covers 90\% of the reworded claims, and every one of them is right; the rest would go to a person.
+\textbf{Flagging low-confidence reads.} We only pass a read straight to the graph step when DistilBERT is at least
+90\% sure. This covers 90\% of the reworded claims, and every one of them is right; the remaining reads are flagged as
+low-confidence for review.
 
 \textbf{Seed check.} Fine-tuning on 600 short sentences depends on the random start. With three other seeds
 DistilBERT read 83--91\% of the reworded claims (100\% with seed 42), always above TF-IDF (67\%). We report this
@@ -368,18 +369,18 @@ in the renamed premises and scores F1 0.00 on refactorization. With it, the rege
 0.27--0.47 and 0.20--0.36. The intervals never overlap.
 
 \textbf{Error analysis.} Every mistake of the DistilBERT pipeline (18 on the original test, 37 on each harder set)
-is a claim it \emph{read correctly}. So reading is no longer the problem: the remaining mistakes are the label
-disagreements found in Phase 1.
+is a claim it \emph{read correctly}. So reading is no longer the problem: the remaining mistakes are the graph--label
+disagreements investigated in Phase 1.
 
 \section{Step 10: Graphs from Reworded Text (Notebook 10)}
 We repeated the Phase 1 DAG step (notebook 05) on the paraphrasing set. Every ``X directly affects Y'' claim that the DistilBERT pipeline calls
 valid, and that DistilBERT read with at least 90\% confidence, becomes an arrow (all 138 were confident, so none
-had to wait for review). The same rules skip self-loops, unknown variables and cycles, so all 21 graphs are DAGs.
+was flagged). The same rules skip self-loops, unknown variables and cycles, so all 21 graphs are DAGs.
 
 \textbf{Results.} We drew 73 arrows and 65 are correct: \textbf{edge precision 0.89 and recall 1.00}, exactly the
-Phase 1 graphs. On the five fully known premises the graphs answer \textbf{28 of the 32} real intervention effects
-correctly (92 of 96 queries). The regex reader finds no arrows in the reworded text, so its graphs are empty and
-it gets 0 of the 32 real effects.
+Phase 1 graphs. On the five fully known premises the graphs answer \textbf{28 of the 32} intervention queries
+with causal paths correctly, on simulated data (92 of 96 queries in total). The regex reader finds no arrows in the
+reworded text, so its graphs are empty and it gets 0 of these 32 queries.
 
 
 \section{Ablation Studies}
@@ -402,7 +403,8 @@ Train the readers on the 5 original templates only, not 20 wordings & Held-out-w
 $\to$ 0.50, TF-IDF 0.92 $\to$ 0.75 \\
 Turn off the renaming rule (raw names) & Renamed-set F1: regex + PC 0.948 $\to$ 0.000; end-to-end 0.507 $\to$
 0.294 \\
-Review threshold: pass only reads $\geq$ 90\% sure & 90.4\% of reworded claims pass, all read correctly \\
+Review threshold: flag reads below 90\% confidence & 90.4\% of reworded claims pass unflagged, all read
+correctly \\
 Change the random seed (4 seeds) & Reworded claims read: 83--100\% (TF-IDF 67\%) \\
 \bottomrule
 \end{tabular}
@@ -429,11 +431,11 @@ Table~\ref{tab:improved} puts the two phases side by side.
 \midrule
 Reads the claim with & Regex (5 fixed wordings) & Fine-tuned DistilBERT \\
 Variable names & Only A--F & Any letters, renamed to A--F \\
-Unsure reads & Not checked & Below 90\% confidence go to review \\
+Low-confidence reads & Not checked & Below 90\% confidence flagged for review \\
 Test sets & Original only & Original, reworded, renamed \\
 F1, reworded claims & 0.000 & \textbf{0.948} \\
 F1, renamed variables (raw text) & 0.000 & \textbf{0.948} \\
-``What if'' from reworded text & 0 / 32 & \textbf{28 / 32} \\
+What-if queries with causal paths, reworded text (simulated) & 0 / 32 & \textbf{28 / 32} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -443,9 +445,9 @@ and that was enough to make the whole pipeline work on text it had never seen.
 
 \section{Conclusion and Next Steps}
 A fine-tuned DistilBERT that reads everything reaches only 0.53 F1 and falls to 0.39 and 0.29 when the text is
-reworded or the variables renamed: fluent language is not causal reasoning. A DistilBERT that only reads the claim,
+reworded or the variables renamed: this language-only baseline does not learn the causal rule. A DistilBERT that only reads the claim,
 a fixed renaming rule, and the PC graph keep 0.95 F1 on all three test sets, and the graphs built from reworded text
-still answer 28 of 32 real ``what if'' effects.
+still answer 28 of 32 intervention queries with causal paths on simulated data.
 
 \textbf{Limitations.} Corr2Cause is made from templates; the reworded set changes only the claim, with one new
 wording per claim type, and the premises are still read by regex. Our extra training wordings were written by us,
